@@ -10,14 +10,26 @@ sc.setLogLevel('ERROR')
 sqlc = SQLContext(sc)
 
 # real dataframe, two weeks before election
-dataFrame = sqlc.read.json("/data/doina/Twitter-Archive.org/03/{0[0-9],1[0-5]}/*/*")
+dataFrame = sqlc.read.json("/data/doina/Twitter-Archive.org/03/{0[0-9],1[0-4]}/*/*")
 
-# real dataframe, poll 2 period
+# real dataframe, poll 4 period
 # dataFrame = sqlc.read.json("/data/doina/Twitter-Archive.org/02/{1[5-9],2[0-8]}/*/*")
 
-# test dataframe for running on farm01
+# real dataframe, poll 3 period
+# dataFrame = sqlc.read.json("/data/doina/Twitter-Archive.org/02/{0[0-9],1[0-4]}/*/*")
+
+# real dataframe, poll 2 period
+# dataFrame = sqlc.read.json("/data/doina/Twitter-Archive.org/01/{1[5-9],2[0-8]}/*/*")
+
+# real dataframe, poll 1 period
+# dataFrame = sqlc.read.json("/data/doina/Twitter-Archive.org/01/{0[0-9],1[0-4]}/*/*")
+
+# test dataframe
 # dataFrame = sqlc.read.json("/data/doina/Twitter-Archive.org/01/01/*/*")
 
+#
+# Dictionary mapping the keywords to the party they belong to.
+#
 KEYWORDS = {
     "Volkspartij voor Vrijheid en Democratie": 'vvd',
     "VVD": 'vvd',
@@ -99,6 +111,9 @@ KEYWORDS = {
     "thierrybaudet": 'fvd',
 }
 
+#
+# List of Twitter handles (without the @) that we exclude. Includes parties own handles and major news outlets.
+#
 EXCLUDE_HANDLES = ['VVD', 'markrutte', 'dijkhoff', 'geertwilderspvv', 'cdavandaag', 'sybrandbuma', 'd66',
                    'APechtold', 'groenlinks', 'jesseklaver', 'SPnl', 'emileroemer', 'MarijnissenL', 'PvdA',
                    'LodewijkA', 'christenunie', 'gertjansegers', 'PartijvdDieren', 'mariannethieme',
@@ -115,10 +130,10 @@ EXCLUDE_HANDLES = ['VVD', 'markrutte', 'dijkhoff', 'geertwilderspvv', 'cdavandaa
 #
 # method mapping a tweet to a party based on keywords and excluded handles
 #
-
-
 def mapTweetToParty(tweet):
+    # parse a tweet as a dictionary
     tweet = tweet.asDict()
+    # encode the tweet text as utf8 (Tweets are utf8)
     text = tweet['text'].encode('utf8')
 
     # check if we should exclude handle
@@ -126,15 +141,22 @@ def mapTweetToParty(tweet):
     if screen_name in EXCLUDE_HANDLES:
         return (None, text)
 
-    # extract party
+    # remove hashtags and twitter handle symbols from text, convert to lower case and split text in words
     words = text.replace('@', '').replace('#', '').lower().split()
+    # establish an empty set of all parties matched, a set so duplicate parties are already filtered
     parties = set()
+
+    # iterate over every keyword
     for keyword, party in KEYWORDS.items():
+        # check if keyword occurs in the sentence
         if keyword.lower() in words:
+            # if it occurs, the tweet matches that keyword's party
             parties.add(party)
 
+    # if a tweet does not match exactly one party, we don't count it as a vote
     if len(parties) != 1:
         return (None, text)
+    # else we return the party the tweet matches
     else:
         return (parties.pop(), text)
 
@@ -164,14 +186,22 @@ def merge_combiners(combiner1, combiner2):
     return combiner1 + combiner2
 
 
+# where => filter so that we only have Dutch tweets remaining
+# select => select, from a tweet, only the text and the screen name of the tweeter
+# map => for every tweet that is now left, determine what party it matches
+# filter => filter out all tweets that have 'None' as a party (ie. no match, or multiple matches)
+# combineByKey => combine all seperate tweets into one key-value pair: (party, [list of tweet texts])
 tweets = dataFrame.where(dataFrame.lang == 'nl').select('text', 'user.screen_name').rdd \
     .map(mapTweetToParty) \
     .filter(lambda tuple: tuple[0] is not None) \
     .combineByKey(create_combiner, merge_value, merge_combiners)
 
+# number of tweets per party we wish to extract
 N = 200
 
+# for every party, save the tweets
 for party, tweets in tweets.collect():
+    # to this filename
     filename = "/home/s1220535/gone-with-polls/200tweets/{}/{}.txt".format('pre-election', party)
 
     # check if folder exists
@@ -185,6 +215,8 @@ for party, tweets in tweets.collect():
 
     # write file for party
     f = open(filename, 'w+')
+    # write every tweet on one line (remove any newlines from the tweets)
+    # should result in a file of max. 200 lines, every line containing exactly one tweet about that party
     f.writelines(map(lambda t: t.replace('\n', '').replace('\r', '') + '\n',
                      choice(tweets, size=min(N, len(tweets)), replace=False).tolist()))
     f.close()
