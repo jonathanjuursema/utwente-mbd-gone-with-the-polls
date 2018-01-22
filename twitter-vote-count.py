@@ -11,12 +11,21 @@ sc.setLogLevel('ERROR')
 sqlc = SQLContext(sc)
 
 # real dataframe, two weeks before election
-dataFrame = sqlc.read.json("/data/doina/Twitter-Archive.org/03/{0[0-9],1[0-5]}/*/*")
+# dataFrame = sqlc.read.json("/data/doina/Twitter-Archive.org/03/{0[0-9],1[0-4]}/*/*")
 
-# real dataframe, poll 2 period
+# real dataframe, poll 4 period
 # dataFrame = sqlc.read.json("/data/doina/Twitter-Archive.org/02/{1[5-9],2[0-8]}/*/*")
 
-# test dataframe for running on farm01
+# real dataframe, poll 3 period
+# dataFrame = sqlc.read.json("/data/doina/Twitter-Archive.org/02/{0[0-9],1[0-4]}/*/*")
+
+# real dataframe, poll 2 period
+# dataFrame = sqlc.read.json("/data/doina/Twitter-Archive.org/01/{1[5-9],2[0-8]}/*/*")
+
+# real dataframe, poll 1 period
+dataFrame = sqlc.read.json("/data/doina/Twitter-Archive.org/01/{0[0-9],1[0-4]}/*/*")
+
+# test dataframe
 # dataFrame = sqlc.read.json("/data/doina/Twitter-Archive.org/01/01/*/*")
 
 KEYWORDS = {
@@ -154,8 +163,11 @@ tweets = dataFrame.where(dataFrame.lang == 'nl').select('text', 'user.screen_nam
     .map(mapTweetToParty) \
     .filter(lambda tuple: tuple[1][0][0] is not None) \
     .reduceByKey(lambda a, b: a + b) \
+    # group party count in each user by party and sort by party count. it transforms (screen_name, [(party1, 1), (party2, 1), (party2, 1)]) to (screen_name, [(party2, 2), (party1, 1)])
     .map(lambda tuple: (tuple[0], sorted([reduce(reduceParty, parties) for _, parties in groupby(sorted(tuple[1], key=itemgetter(0)), key=itemgetter(0))], key=itemgetter(1), reverse=True))) \
+    # filter the user that only have 1 party count or doesn't have multiple largest party count
     .filter(lambda tuple: len(tuple[1]) == 1 or tuple[1][0][1] != tuple[1][1][1]) \
+    # for each user, get the party with largest party count
     .map(lambda tuple: (tuple[1][0][0], 1)) \
     .reduceByKey(lambda a, b: a + b)
 
